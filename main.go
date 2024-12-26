@@ -48,9 +48,6 @@ ympT95CfHN2ydyMsHpBHUQ2pDkJOJg8=
 		return
 	}
 
-	// abi.encodePacked hex input
-	fmt.Println(hex.EncodeToString(encoded))
-
 	// Test against `Run`
 	contract := &gpgEd25519Verify{}
 	result, err := contract.Run(encoded)
@@ -83,7 +80,7 @@ func abiEncodePacked(message, publicKey, signature []byte) ([]byte, error) {
     
 	// Convert the result to a hexadecimal string for debugging
     result := buffer.Bytes()
-    // fmt.Printf("Encoded result (hex): %s\n", hex.EncodeToString(result))
+    fmt.Printf("Encoded result (hex): %s\n", hex.EncodeToString(result))
 
     return result, nil
 }
