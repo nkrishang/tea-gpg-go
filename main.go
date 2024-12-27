@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"io"
 
 	"encoding/hex"
 	"errors"
@@ -9,17 +10,18 @@ import (
 	"math/big"
 
 	pgpcrypto "github.com/ProtonMail/gopenpgp/v2/crypto"
+	"golang.org/x/crypto/openpgp/armor"
 )
 
 func main() {
 	messageHex := "48656c6c6f2c20576f726c64" // "Hello, World" in hex
 	message, err := hex.DecodeString(messageHex)
-		if err != nil {
-			fmt.Printf("Failed to decode messageHex: %v\n", err)
-			return
-		}
+	if err != nil {
+		fmt.Printf("Failed to decode messageHex: %v\n", err)
+		return
+	}
 
-		publicKey := []byte(`-----BEGIN PGP PUBLIC KEY BLOCK-----
+	armoredPublicKey := `-----BEGIN PGP PUBLIC KEY BLOCK-----
 
 mDMEZ2pdDhYJKwYBBAHaRw8BAQdAXRCrGQMPij7crOE9DhZjZ9KV8eEU74fI8wCc
 2pMaDuu0K0tyaXNoYW5nIE5hZGdhdWRhIDxrcmlzaGFuZy5ub3RlQGdtYWlsLmNv
@@ -31,15 +33,26 @@ QWgdfhUu779zBCyjLgMBCAeIeAQYFgoAIBYhBMDC3NihB0bkfHWxgZZ2cvhFREO4
 BQJnal0OAhsMAAoJEJZ2cvhFREO42UgBAP2hw1hELhVWEv4K91fy7rlP6mXZ+Q3a
 pXurN2g4kMGfAPwJz24Hsjj4E2HtucwRn8h2uV9oqgAdgwjVPY8/mdz8Ag==
 =3g4k
------END PGP PUBLIC KEY BLOCK-----`)
+-----END PGP PUBLIC KEY BLOCK-----`
 
-		signature := []byte(`-----BEGIN PGP SIGNATURE-----
+	// Decode the armored data
+	publicKey, err := armoredToBytes(armoredPublicKey)
+	if err != nil {
+		panic(err)
+	}
+
+	armoredSignature := `-----BEGIN PGP SIGNATURE-----
 
 iHUEABYKAB0WIQTAwtzYoQdG5Hx1sYGWdnL4RURDuAUCZ2qakAAKCRCWdnL4RURD
 uE0HAP9B1Mgdl16JTc2FGUONgEZltmx49iJlJw9yuaEIuQtwFAEA7F6tZzrPZ76o
 ympT95CfHN2ydyMsHpBHUQ2pDkJOJg8=
 =/i/M
------END PGP SIGNATURE-----`)
+-----END PGP SIGNATURE-----`
+
+	signature, err := armoredToBytes(armoredSignature)
+	if err != nil {
+		panic(err)
+	}
 
 	// Perform abi.encodePacked operation
 	encoded, err := abiEncodePacked(message, publicKey, signature)
@@ -64,27 +77,51 @@ ympT95CfHN2ydyMsHpBHUQ2pDkJOJg8=
 }
 
 func abiEncodePacked(message, publicKey, signature []byte) ([]byte, error) {
-    toBytes32 := func(length int) []byte {
-        padded := make([]byte, 32)
-        big.NewInt(int64(length)).FillBytes(padded)
-        return padded
-    }
+	toBytes32 := func(length int) []byte {
+		padded := make([]byte, 32)
+		big.NewInt(int64(length)).FillBytes(padded)
+		return padded
+	}
 
-    var buffer bytes.Buffer
-    buffer.Write(toBytes32(len(message)))
-    buffer.Write(message)
-    buffer.Write(toBytes32(len(publicKey)))
-    buffer.Write(publicKey)
-    buffer.Write(toBytes32(len(signature)))
-    buffer.Write(signature)
-    
+	var buffer bytes.Buffer
+	buffer.Write(toBytes32(len(message)))
+	buffer.Write(message)
+	buffer.Write(toBytes32(len(publicKey)))
+	buffer.Write(publicKey)
+	buffer.Write(toBytes32(len(signature)))
+	buffer.Write(signature)
+
 	// Convert the result to a hexadecimal string for debugging
-    result := buffer.Bytes()
-    fmt.Printf("Encoded result (hex): %s\n", hex.EncodeToString(result))
+	result := buffer.Bytes()
+	fmt.Printf("Encoded result (hex): %s\n", hex.EncodeToString(result))
 
-    return result, nil
+	return result, nil
 }
 
+func armoredToBytes(armoredData string) ([]byte, error) {
+	block, err := armor.Decode(bytes.NewReader([]byte(armoredData)))
+	if err != nil {
+		return nil, err
+	}
+	return io.ReadAll(block.Body)
+}
+
+func bytesToArmored(data []byte, blockType string) string {
+	buf := bytes.Buffer{}
+	armorWriter, err := armor.Encode(&buf, blockType, nil)
+	if err != nil {
+		panic(err)
+	}
+	_, err = armorWriter.Write(data)
+	if err != nil {
+		panic(err)
+	}
+	err = armorWriter.Close()
+	if err != nil {
+		panic(err)
+	}
+	return buf.String()
+}
 
 var GpgEd25519VerifyGas uint64 = 2000 // GPG Ed25519 signature verification gas price
 
@@ -127,6 +164,7 @@ func (c *gpgEd25519Verify) Run(input []byte) ([]byte, error) {
 		return nil, errPubKeyTooShort
 	}
 	pubKey := input[offset+32 : offset+32+pubKeyLen]
+	armoredPubKey := bytesToArmored(pubKey, "PGP PUBLIC KEY BLOCK")
 
 	// Extract signature length and signature
 	offset = offset + 32 + pubKeyLen
@@ -135,10 +173,7 @@ func (c *gpgEd25519Verify) Run(input []byte) ([]byte, error) {
 		return nil, errSignatureTooShort
 	}
 	signature := input[offset+32 : offset+32+sigLen]
-
-	// Convert raw bytes to armored format
-	armoredPubKey := string(pubKey)
-	armoredSig := string(signature)
+	armoredSig := bytesToArmored(signature, "PGP SIGNATURE")
 
 	// Create public key object
 	pubKeyObj, err := pgpcrypto.NewKeyFromArmored(armoredPubKey)
@@ -167,9 +202,9 @@ func (c *gpgEd25519Verify) Run(input []byte) ([]byte, error) {
 	messageObj := pgpcrypto.NewPlainMessage(messageBytes)
 
 	// Verify signature
-	err = pubKeyRing.VerifyDetached(messageObj, signatureObj, pgpcrypto.GetUnixTime())
+	err = pubKeyRing.VerifyDetached(messageObj, signatureObj, 0)
 	if err != nil {
-		return nil, errVerificationFailed
+		return []byte{}, nil
 	}
 
 	// Return 32 bytes: 1 for success, 0 for failure
