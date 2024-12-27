@@ -103,6 +103,7 @@ func armoredToBytes(armoredData string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	// TODO: DO WE NEED THE OPTIONAL HEADERS HERE TOO FOR VERIFICATION?
 	return io.ReadAll(block.Body)
 }
 
@@ -202,9 +203,9 @@ func (c *gpgEd25519Verify) Run(input []byte) ([]byte, error) {
 	messageObj := pgpcrypto.NewPlainMessage(messageBytes)
 
 	// Verify signature
-	err = pubKeyRing.VerifyDetached(messageObj, signatureObj, 0)
+	err = pubKeyRing.VerifyDetached(messageObj, signatureObj, pgpcrypto.GetUnixTime())
 	if err != nil {
-		return []byte{}, nil
+		return nil, err
 	}
 
 	// Return 32 bytes: 1 for success, 0 for failure
