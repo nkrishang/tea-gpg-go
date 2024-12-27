@@ -14,7 +14,7 @@ import (
 )
 
 func main() {
-	messageHex := "29bf7021020ea89dbd91ef52022b5a654b55ed418c9e7aba71ef3b43a51669f2" // keccak256(hello, world) in hex
+	messageHex := "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
 	message, err := hex.DecodeString(messageHex)
 	if err != nil {
 		fmt.Printf("Failed to decode messageHex: %v\n", err)
@@ -43,10 +43,10 @@ pXurN2g4kMGfAPwJz24Hsjj4E2HtucwRn8h2uV9oqgAdgwjVPY8/mdz8Ag==
 
 	armoredSignature := `-----BEGIN PGP SIGNATURE-----
 
-iHUEABYKAB0WIQTAwtzYoQdG5Hx1sYGWdnL4RURDuAUCZ26QKQAKCRCWdnL4RURD
-uORLAP0ennRcIDSXd31CoyuvdxNIxnPQ9twPUDZAUhW8PCHddQD/fnivGxxx6MhQ
-rQBrFXynpYH4vCYsN3s/7qh+4RWpjw4=
-=/lHf
+iHUEABYKAB0WIQTAwtzYoQdG5Hx1sYGWdnL4RURDuAUCZ26cUgAKCRCWdnL4RURD
+uMEAAP4izV1v1FOyutRmQbxB/7PP+oNKLHTaUX6PtkThYx0jtQEAgo7kCZSMHqhw
+0hksOnbL60ZVZFTyDRMvUt/oNd+5rQQ=
+=/V6w
 -----END PGP SIGNATURE-----`
 
 	signature, err := armoredToBytes(armoredSignature)
