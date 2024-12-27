@@ -14,7 +14,7 @@ import (
 )
 
 func main() {
-	messageHex := "290ad3e1a7a25626f90092bd0b8402e697cc5b49e380d2b4aa596fbf87682a5a" // keccak256(Hello, World) in hex
+	messageHex := "29bf7021020ea89dbd91ef52022b5a654b55ed418c9e7aba71ef3b43a51669f2" // keccak256(hello, world) in hex
 	message, err := hex.DecodeString(messageHex)
 	if err != nil {
 		fmt.Printf("Failed to decode messageHex: %v\n", err)
@@ -83,8 +83,6 @@ func abiEncodePacked(message, publicKey, signature []byte) ([]byte, error) {
 		return padded
 	}
 
-	fmt.Println(len(message))
-
 	var buffer bytes.Buffer
 	buffer.Write(message)
 	buffer.Write(toBytes32(len(publicKey)))
@@ -125,7 +123,7 @@ func (c *gpgEd25519Verify) RequiredGas(input []byte) uint64 {
 
 // Run performs ed25519 signature verification
 func (c *gpgEd25519Verify) Run(input []byte) ([]byte, error) {
-	// Input should be: message_len (32 bytes) || message || pubkey_len (32 bytes) || pubkey || sig_len (32 bytes) || signature
+	// Input should be: message (32 bytes) || pubkey_len (32 bytes) || pubkey || sig_len (32 bytes) || signature
 
 	// Extract message
 	msgLen := 32
@@ -179,7 +177,7 @@ func (c *gpgEd25519Verify) Run(input []byte) ([]byte, error) {
 	err = pubKeyRing.VerifyDetached(messageObj, signatureObj, 0)
 	if err != nil {
 		// Return 32 bytes: 0 for failure
-		return []byte{1}, nil
+		return []byte{0}, nil
 	}
 
 	// Return 32 bytes: 1 for success, 0 for failure
