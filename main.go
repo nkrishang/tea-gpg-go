@@ -103,25 +103,7 @@ func armoredToBytes(armoredData string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	// TODO: DO WE NEED THE OPTIONAL HEADERS HERE TOO FOR VERIFICATION?
 	return io.ReadAll(block.Body)
-}
-
-func bytesToArmored(data []byte, blockType string) string {
-	buf := bytes.Buffer{}
-	armorWriter, err := armor.Encode(&buf, blockType, nil)
-	if err != nil {
-		panic(err)
-	}
-	_, err = armorWriter.Write(data)
-	if err != nil {
-		panic(err)
-	}
-	err = armorWriter.Close()
-	if err != nil {
-		panic(err)
-	}
-	return buf.String()
 }
 
 var GpgEd25519VerifyGas uint64 = 2000 // GPG Ed25519 signature verification gas price
@@ -157,6 +139,7 @@ func (c *gpgEd25519Verify) Run(input []byte) ([]byte, error) {
 		return nil, errMessageTooShort
 	}
 	message := input[32 : 32+msgLen]
+	messageObj := pgpcrypto.NewPlainMessage(message)
 
 	// Extract public key length and public key
 	offset := 32 + msgLen
@@ -165,19 +148,9 @@ func (c *gpgEd25519Verify) Run(input []byte) ([]byte, error) {
 		return nil, errPubKeyTooShort
 	}
 	pubKey := input[offset+32 : offset+32+pubKeyLen]
-	armoredPubKey := bytesToArmored(pubKey, "PGP PUBLIC KEY BLOCK")
-
-	// Extract signature length and signature
-	offset = offset + 32 + pubKeyLen
-	sigLen := new(big.Int).SetBytes(input[offset : offset+32]).Uint64()
-	if len(input) < int(offset+32+sigLen) {
-		return nil, errSignatureTooShort
-	}
-	signature := input[offset+32 : offset+32+sigLen]
-	armoredSig := bytesToArmored(signature, "PGP SIGNATURE")
 
 	// Create public key object
-	pubKeyObj, err := pgpcrypto.NewKeyFromArmored(armoredPubKey)
+	pubKeyObj, err := pgpcrypto.NewKey(pubKey)
 	if err != nil {
 		return nil, errInvalidPublicKey
 	}
@@ -188,24 +161,19 @@ func (c *gpgEd25519Verify) Run(input []byte) ([]byte, error) {
 		return nil, errInvalidPublicKey
 	}
 
-	// Parse the armored signature
-	signatureObj, err := pgpcrypto.NewPGPSignatureFromArmored(armoredSig)
-	if err != nil {
-		return nil, errInvalidSignature
+	// Extract signature length and signature
+	offset = offset + 32 + pubKeyLen
+	sigLen := new(big.Int).SetBytes(input[offset : offset+32]).Uint64()
+	if len(input) < int(offset+32+sigLen) {
+		return nil, errSignatureTooShort
 	}
-
-	// Create message object
-	messageHex := hex.EncodeToString(message)
-	messageBytes, err := hex.DecodeString(messageHex)
-	if err != nil {
-		return nil, err
-	}
-	messageObj := pgpcrypto.NewPlainMessage(messageBytes)
+	signature := input[offset+32 : offset+32+sigLen]
+	signatureObj := pgpcrypto.NewPGPSignature(signature)
 
 	// Verify signature
-	err = pubKeyRing.VerifyDetached(messageObj, signatureObj, pgpcrypto.GetUnixTime())
+	err = pubKeyRing.VerifyDetached(messageObj, signatureObj, 0)
 	if err != nil {
-		return nil, err
+		return []byte{0}, nil
 	}
 
 	// Return 32 bytes: 1 for success, 0 for failure
