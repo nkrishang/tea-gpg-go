@@ -14,7 +14,7 @@ import (
 )
 
 func main() {
-	messageHex := "48656c6c6f2c20576f726c64" // "Hello, World" in hex
+	messageHex := "290ad3e1a7a25626f90092bd0b8402e697cc5b49e380d2b4aa596fbf87682a5a" // keccak256(Hello, World) in hex
 	message, err := hex.DecodeString(messageHex)
 	if err != nil {
 		fmt.Printf("Failed to decode messageHex: %v\n", err)
@@ -43,10 +43,10 @@ pXurN2g4kMGfAPwJz24Hsjj4E2HtucwRn8h2uV9oqgAdgwjVPY8/mdz8Ag==
 
 	armoredSignature := `-----BEGIN PGP SIGNATURE-----
 
-iHUEABYKAB0WIQTAwtzYoQdG5Hx1sYGWdnL4RURDuAUCZ2qakAAKCRCWdnL4RURD
-uE0HAP9B1Mgdl16JTc2FGUONgEZltmx49iJlJw9yuaEIuQtwFAEA7F6tZzrPZ76o
-ympT95CfHN2ydyMsHpBHUQ2pDkJOJg8=
-=/i/M
+iHUEABYKAB0WIQTAwtzYoQdG5Hx1sYGWdnL4RURDuAUCZ26QKQAKCRCWdnL4RURD
+uORLAP0ennRcIDSXd31CoyuvdxNIxnPQ9twPUDZAUhW8PCHddQD/fnivGxxx6MhQ
+rQBrFXynpYH4vCYsN3s/7qh+4RWpjw4=
+=/lHf
 -----END PGP SIGNATURE-----`
 
 	signature, err := armoredToBytes(armoredSignature)
@@ -83,8 +83,9 @@ func abiEncodePacked(message, publicKey, signature []byte) ([]byte, error) {
 		return padded
 	}
 
+	fmt.Println(len(message))
+
 	var buffer bytes.Buffer
-	buffer.Write(toBytes32(len(message)))
 	buffer.Write(message)
 	buffer.Write(toBytes32(len(publicKey)))
 	buffer.Write(publicKey)
@@ -112,12 +113,8 @@ var GpgEd25519VerifyGas uint64 = 2000 // GPG Ed25519 signature verification gas 
 type gpgEd25519Verify struct{}
 
 var (
-	errMessageTooShort    = errors.New("message too short")
-	errPubKeyTooShort     = errors.New("public key too short")
-	errSignatureTooShort  = errors.New("signature too short")
-	errInvalidPublicKey   = errors.New("invalid public key format")
-	errInvalidSignature   = errors.New("invalid signature format")
-	errVerificationFailed = errors.New("signature verification failed")
+	errInputTooShort    = errors.New("input too short")
+	errInvalidPublicKey   = errors.New("invalid public key")
 )
 
 // RequiredGas returns the gas required to execute the pre-compiled contract
@@ -129,23 +126,25 @@ func (c *gpgEd25519Verify) RequiredGas(input []byte) uint64 {
 // Run performs ed25519 signature verification
 func (c *gpgEd25519Verify) Run(input []byte) ([]byte, error) {
 	// Input should be: message_len (32 bytes) || message || pubkey_len (32 bytes) || pubkey || sig_len (32 bytes) || signature
-	if len(input) < 96 { // minimum length for the three length fields
-		return nil, errMessageTooShort
+
+	// Extract message
+	msgLen := 32
+	if len(input) < msgLen {
+		return nil, errInputTooShort
 	}
 
-	// Extract message length and message
-	msgLen := new(big.Int).SetBytes(input[:32]).Uint64()
-	if len(input) < 32+int(msgLen) {
-		return nil, errMessageTooShort
-	}
-	message := input[32 : 32+msgLen]
+	message := input[:msgLen]
 	messageObj := pgpcrypto.NewPlainMessage(message)
 
 	// Extract public key length and public key
-	offset := 32 + msgLen
-	pubKeyLen := new(big.Int).SetBytes(input[offset : offset+32]).Uint64()
+	offset := msgLen
+	if len(input) < offset + 32 {
+		return nil, errInputTooShort
+	}
+	
+	pubKeyLen := int(new(big.Int).SetBytes(input[offset : offset+32]).Uint64())
 	if len(input) < int(offset+32+pubKeyLen) {
-		return nil, errPubKeyTooShort
+		return nil, errInputTooShort
 	}
 	pubKey := input[offset+32 : offset+32+pubKeyLen]
 
@@ -163,17 +162,24 @@ func (c *gpgEd25519Verify) Run(input []byte) ([]byte, error) {
 
 	// Extract signature length and signature
 	offset = offset + 32 + pubKeyLen
-	sigLen := new(big.Int).SetBytes(input[offset : offset+32]).Uint64()
+	if len(input) < offset + 32 {
+		return nil, errInputTooShort
+	}
+
+	sigLen := int(new(big.Int).SetBytes(input[offset : offset+32]).Uint64())
 	if len(input) < int(offset+32+sigLen) {
-		return nil, errSignatureTooShort
+		return nil, errInputTooShort
 	}
 	signature := input[offset+32 : offset+32+sigLen]
+
+	// Create signature object
 	signatureObj := pgpcrypto.NewPGPSignature(signature)
 
 	// Verify signature
 	err = pubKeyRing.VerifyDetached(messageObj, signatureObj, 0)
 	if err != nil {
-		return []byte{0}, nil
+		// Return 32 bytes: 0 for failure
+		return []byte{1}, nil
 	}
 
 	// Return 32 bytes: 1 for success, 0 for failure
