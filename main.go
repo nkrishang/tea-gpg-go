@@ -10,6 +10,7 @@ import (
 	"math/big"
 
 	pgpcrypto "github.com/ProtonMail/gopenpgp/v2/crypto"
+	"github.com/ethereum/go-ethereum/accounts/abi"
 	"golang.org/x/crypto/openpgp/armor"
 )
 
@@ -55,7 +56,7 @@ uMEAAP4izV1v1FOyutRmQbxB/7PP+oNKLHTaUX6PtkThYx0jtQEAgo7kCZSMHqhw
 	}
 
 	// Perform abi.encodePacked operation
-	encoded, err := abiEncodePacked(message, publicKey, signature)
+	encoded, err := abiEncode(message, publicKey, signature)
 	if err != nil {
 		fmt.Printf("Error encoding data: %v\n", err)
 		return
@@ -76,22 +77,37 @@ uMEAAP4izV1v1FOyutRmQbxB/7PP+oNKLHTaUX6PtkThYx0jtQEAgo7kCZSMHqhw
 	}
 }
 
-func abiEncodePacked(message, publicKey, signature []byte) ([]byte, error) {
-	toBytes32 := func(length int) []byte {
-		padded := make([]byte, 32)
-		big.NewInt(int64(length)).FillBytes(padded)
-		return padded
+func abiEncode(message, publicKey, signature []byte) ([]byte, error) {
+	// Ensure the message is exactly 32 bytes
+	if len(message) != 32 {
+		return nil, fmt.Errorf("message must be 32 bytes")
+	}
+	var messageFixed [32]byte
+	copy(messageFixed[:], message)
+
+	// Define ABI types
+	bytesType, err := abi.NewType("bytes", "", nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create bytes type: %v", err)
+	}
+	bytes32Type, err := abi.NewType("bytes32", "", nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create bytes32 type: %v", err)
 	}
 
-	var buffer bytes.Buffer
-	buffer.Write(message)
-	buffer.Write(toBytes32(len(publicKey)))
-	buffer.Write(publicKey)
-	buffer.Write(toBytes32(len(signature)))
-	buffer.Write(signature)
+	// Create ABI arguments
+	arguments := abi.Arguments{
+		{Type: bytes32Type},
+		{Type: bytesType},
+		{Type: bytesType},
+	}
 
-	// Convert the result to a hexadecimal string for debugging
-	result := buffer.Bytes()
+	// Pack the data
+	result, err := arguments.Pack(messageFixed, publicKey, signature)
+	if err != nil {
+		return nil, fmt.Errorf("failed to pack data: %v", err)
+	}
+
 	fmt.Printf("Encoded result (hex): %s\n", hex.EncodeToString(result))
 
 	return result, nil
@@ -123,28 +139,28 @@ func (c *gpgEd25519Verify) RequiredGas(input []byte) uint64 {
 
 // Run performs ed25519 signature verification
 func (c *gpgEd25519Verify) Run(input []byte) ([]byte, error) {
-	// Input should be: message (32 bytes) || pubkey_len (32 bytes) || pubkey || sig_len (32 bytes) || signature
+	// Input should be: abi.encode(bytes32 message, bytes publicKey, bytes signature)
 
-	// Extract message
-	msgLen := 32
-	if len(input) < msgLen {
+	if len(input) < 96 { // 32 bytes (message) + 32 bytes (publicKey offset) + 32 bytes (signature offset)
 		return nil, errInputTooShort
 	}
 
-	message := input[:msgLen]
+	// Extract message
+	message := input[:32]
 	messageObj := pgpcrypto.NewPlainMessage(message)
 
 	// Extract public key length and public key
-	offset := msgLen
-	if len(input) < offset + 32 {
+	publicKeyOffset := int(new(big.Int).SetBytes(input[32 : 64]).Uint64())
+	if len(input) < publicKeyOffset { 
 		return nil, errInputTooShort
 	}
-	
-	pubKeyLen := int(new(big.Int).SetBytes(input[offset : offset+32]).Uint64())
-	if len(input) < int(offset+32+pubKeyLen) {
+
+	pubKeyLen := int(new(big.Int).SetBytes(input[publicKeyOffset : publicKeyOffset+32]).Uint64())
+	if len(input) < int(publicKeyOffset+32+pubKeyLen) {
 		return nil, errInputTooShort
 	}
-	pubKey := input[offset+32 : offset+32+pubKeyLen]
+
+	pubKey := input[publicKeyOffset+32 : publicKeyOffset+32+pubKeyLen]
 
 	// Create public key object
 	pubKeyObj, err := pgpcrypto.NewKey(pubKey)
@@ -159,16 +175,17 @@ func (c *gpgEd25519Verify) Run(input []byte) ([]byte, error) {
 	}
 
 	// Extract signature length and signature
-	offset = offset + 32 + pubKeyLen
-	if len(input) < offset + 32 {
+	signatureOffset := int(new(big.Int).SetBytes(input[64:96]).Uint64())
+	if len(input) < signatureOffset { 
 		return nil, errInputTooShort
 	}
 
-	sigLen := int(new(big.Int).SetBytes(input[offset : offset+32]).Uint64())
-	if len(input) < int(offset+32+sigLen) {
+	sigLen := int(new(big.Int).SetBytes(input[signatureOffset : signatureOffset+32]).Uint64())
+	if len(input) < int(signatureOffset+32+sigLen) {
 		return nil, errInputTooShort
 	}
-	signature := input[offset+32 : offset+32+sigLen]
+
+	signature := input[signatureOffset+32 : signatureOffset+32+sigLen]
 
 	// Create signature object
 	signatureObj := pgpcrypto.NewPGPSignature(signature)
